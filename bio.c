@@ -26,6 +26,7 @@
 #include "fs.h"
 #include "buf.h"
 
+
 struct {
   struct spinlock lock;
   struct buf buf[NBUF];
@@ -35,6 +36,25 @@ struct {
   struct buf head;
 } bcache;
 
+void printBcacheBlocks(void)
+{
+  struct buf *b;
+
+  acquire(&bcache.lock);
+
+  //cprintf("Block numbers in bcache: ");
+
+  // Traverse the linked list of buffers starting from the head
+  for(b = bcache.head.next; b != &bcache.head; b = b->next){
+    //cprintf("%d ", b->blockno); // Print block number
+  }
+  //cprintf("\n"); // End the line after printing all block numbers
+
+  release(&bcache.lock);
+}
+
+
+
 void
 binit(void)
 {
@@ -42,7 +62,7 @@ binit(void)
 
   initlock(&bcache.lock, "bcache");
 
-//PAGEBREAK!
+  //PAGEBREAK!
   // Create linked list of buffers
   bcache.head.prev = &bcache.head;
   bcache.head.next = &bcache.head;
@@ -53,24 +73,44 @@ binit(void)
     bcache.head.next->prev = b;
     bcache.head.next = b;
   }
+  //cprintf("---After initializing--- \n");
+  printBcacheBlocks();
 }
+
+
 
 // Look through buffer cache for block on device dev.
 // If not found, allocate a buffer.
 // In either case, return locked buffer.
+// Helper function to move a buffer to the head of the list
+static void
+movetohead(struct buf *b)
+{
+  // Remove from current position
+  b->prev->next = b->next;
+  b->next->prev = b->prev;
+
+  // Move to head
+  b->next = bcache.head.next;
+  b->prev = &bcache.head;
+  bcache.head.next->prev = b;
+  bcache.head.next = b;
+}
 static struct buf*
 bget(uint dev, uint blockno)
 {
   struct buf *b;
 
   acquire(&bcache.lock);
-
   // Is the block already cached?
   for(b = bcache.head.next; b != &bcache.head; b = b->next){
     if(b->dev == dev && b->blockno == blockno){
       b->refcnt++;
+      movetohead(b); // Move to the head of the list since it's used
       release(&bcache.lock);
       acquiresleep(&b->lock);
+      //cprintf("---During Bget for block: %d--- \n", blockno);
+      printBcacheBlocks();
       return b;
     }
   }
@@ -84,13 +124,31 @@ bget(uint dev, uint blockno)
       b->blockno = blockno;
       b->flags = 0;
       b->refcnt = 1;
+      movetohead(b); // Move to the head of the list since it's newly allocated
       release(&bcache.lock);
       acquiresleep(&b->lock);
+      //cprintf("---During Bget for block: %d--- \n", blockno);
+      printBcacheBlocks();
       return b;
     }
   }
+
+  // If no unused buffer is found, forcefully evict the least recently used buffer
+  b = bcache.head.prev;
+  b->dev = dev;
+  b->blockno = blockno;
+  b->flags = 0;
+  b->refcnt = 1;
+  movetohead(b); // Move to the head of the list since it's newly allocated
+  release(&bcache.lock);
+  acquiresleep(&b->lock);
+  //cprintf("Block not cached, evicting least recently used buffer and allocating: %d\n", blockno);
+  //cprintf("---During Bget for block: %d--- \n", blockno);
+  printBcacheBlocks();
+  return b;
   panic("bget: no buffers");
 }
+
 
 // Return a locked buf with the contents of the indicated block.
 struct buf*
@@ -126,19 +184,19 @@ brelse(struct buf *b)
   releasesleep(&b->lock);
 
   acquire(&bcache.lock);
-  b->refcnt--;
-  if (b->refcnt == 0) {
-    // no one is waiting for it.
-    b->next->prev = b->prev;
-    b->prev->next = b->next;
-    b->next = bcache.head.next;
-    b->prev = &bcache.head;
-    bcache.head.next->prev = b;
-    bcache.head.next = b;
-  }
   
+  // Move to the head of the MRU list
+  b->next->prev = b->prev;
+  b->prev->next = b->next;
+  b->next = bcache.head.next;
+  b->prev = &bcache.head;
+  bcache.head.next->prev = b;
+  bcache.head.next = b;
   release(&bcache.lock);
+  //cprintf("---During Brelse--- \n");
+  printBcacheBlocks();
 }
+
 //PAGEBREAK!
 // Blank page.
 
