@@ -26,11 +26,13 @@
 #include "fs.h"
 #include "buf.h"
 
+#define BUFFER_SIZE 5
+
 struct {
   struct spinlock lock;
-  struct buf buf[NBUF];
+	struct buf buf[BUFFER_SIZE];
 
-  // Linked list of all buffers, through prev/next.
+	// Linked list of all buffers, through prev/next.
   // head.next is most recently used.
   struct buf head;
 } bcache;
@@ -46,13 +48,14 @@ binit(void)
   // Create linked list of buffers
   bcache.head.prev = &bcache.head;
   bcache.head.next = &bcache.head;
-  for(b = bcache.buf; b < bcache.buf+NBUF; b++){
-    b->next = bcache.head.next;
+	for (b = bcache.buf; b < bcache.buf + BUFFER_SIZE; b++)
+	{
+		b->next = bcache.head.next;
     b->prev = &bcache.head;
     initsleeplock(&b->lock, "buffer");
     bcache.head.next->prev = b;
     bcache.head.next = b;
-  }
+	}
 }
 
 // Look through buffer cache for block on device dev.
@@ -65,12 +68,13 @@ bget(uint dev, uint blockno)
 
   acquire(&bcache.lock);
 
-  // Is the block already cached?
+	// Is the block already cached?
   for(b = bcache.head.next; b != &bcache.head; b = b->next){
     if(b->dev == dev && b->blockno == blockno){
       b->refcnt++;
-      release(&bcache.lock);
-      acquiresleep(&b->lock);
+			cprintf("\nCached block: %d", blockno);
+			release(&bcache.lock);
+			acquiresleep(&b->lock);
       return b;
     }
   }
@@ -80,7 +84,8 @@ bget(uint dev, uint blockno)
   // because log.c has modified it but not yet committed it.
   for(b = bcache.head.prev; b != &bcache.head; b = b->prev){
     if(b->refcnt == 0 && (b->flags & B_DIRTY) == 0) {
-      b->dev = dev;
+			cprintf("\nBlock not found: %d", blockno);
+			b->dev = dev;
       b->blockno = blockno;
       b->flags = 0;
       b->refcnt = 1;
@@ -89,7 +94,19 @@ bget(uint dev, uint blockno)
       return b;
     }
   }
-  panic("bget: no buffers");
+  // panic("bget: no buffers");
+	// Evict the first added buffer (pointed to by bcache.head.prev)
+	b = bcache.head.prev;
+	int previous_blockno = b->blockno;
+	b->dev = dev;
+	b->blockno = blockno;
+	b->flags = 0;
+	b->refcnt = 1;
+	bcache.head = *(bcache.head.prev);
+	cprintf("\nOld block %d new block %d", previous_blockno, b->blockno);
+	release(&bcache.lock);
+	acquiresleep(&b->lock);
+	return b;
 }
 
 // Return a locked buf with the contents of the indicated block.
