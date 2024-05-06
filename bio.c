@@ -26,8 +26,6 @@
 #include "fs.h"
 #include "buf.h"
 
-#define BUFFER_SIZE 5
-
 struct
 {
     struct spinlock lock;
