@@ -4,6 +4,8 @@ struct buf {
   uint blockno;
   struct sleeplock lock;
   uint refcnt;
+  uint buf_type;
+  uint cnt;
   struct buf *prev; // LRU cache list
   struct buf *next;
   struct buf *qnext; // disk queue
