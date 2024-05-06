@@ -147,19 +147,12 @@ bget(uint dev, uint blockno)
         if (b->dev == dev && b->blockno == blockno)
         {
             //cprintf("\nBringing back to main queue");
-            struct buf *b1 = bcache.head.prev;
-            b1->dev = b->dev;
-            b1->blockno = b->blockno;
-            b1->flags = 0;
-            b1->refcnt = 1;
-            b->dev = 0;
-            b->flags = 0;
-            b->blockno = 0;
+            b->refcnt++;
             // movetohead(b1, 0);
             release(&bcache.lock);
-            acquiresleep(&b1->lock);
+            acquiresleep(&b->lock);
             printBcacheBlocks();
-            return b1;
+            return b;
         }
     }
 
